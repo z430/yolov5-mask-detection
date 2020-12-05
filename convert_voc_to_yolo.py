@@ -1,3 +1,5 @@
+import subprocess
+import shutil
 import glob
 import os
 import xml.etree.ElementTree as ET
@@ -63,18 +65,24 @@ def main():
     for dir_path in dirs:
         full_dir_path = os.path.join(cwd, dir_path)
         output_path = os.path.join(cwd, f"yolo/labels/{dir_path}")
+        image_folder = os.path.join(cwd, f"yolo/images/{dir_path}")
         print(f"output path: {output_path}")
+
+        print(f"image_folder")
         print(f"full dir path: {full_dir_path}")
-        print(f"{cwd}")
+        print(f"{image_folder}")
 
         if not os.path.exists(output_path):
             os.makedirs(output_path)
+            os.makedirs(image_folder)
 
         image_paths = getImagesInDir(full_dir_path)
         list_file = open(full_dir_path + '.txt', 'w')
 
         for image_path in tqdm.tqdm(image_paths):
             list_file.write(image_path + '\n')
+            # print(image_path, image_folder)
+            shutil.copy(image_path, image_folder)
             convert_annotation(full_dir_path, output_path, image_path)
         list_file.close()
 
