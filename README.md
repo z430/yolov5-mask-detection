@@ -30,5 +30,5 @@ $ python detect.py --source 0  # webcam
 ![](https://i.ibb.co/CK3bRck/img3.jpg)
 
 ## Citation
-* [1] convert_voc_to_yolo.py [](https://gist.github.com/Amir22010/a99f18ca19112bc7db0872a36a03a1ec)
-* [2] yolov5 [](https://github.com/ultralytics/yolov5)
+* [1] [convert_voc_to_yolo.py](https://gist.github.com/Amir22010/a99f18ca19112bc7db0872a36a03a1ec)
+* [2] [yolov5 ](https://github.com/ultralytics/yolov5)
