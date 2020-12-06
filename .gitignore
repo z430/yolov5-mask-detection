@@ -253,3 +253,5 @@ fabric.properties
 
 # user defined
 datasets/
+checkpoints/
+.DS_Store
