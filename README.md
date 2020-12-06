@@ -27,5 +27,5 @@ $ python detect.py --source 0  # webcam
 ## Results
 
 ## Citation
-convert_voc_to_yolo.py [1](https://gist.github.com/Amir22010/a99f18ca19112bc7db0872a36a03a1ec)
-yolov5 [2](https://github.com/ultralytics/yolov5)
+* convert_voc_to_yolo.py [1](https://gist.github.com/Amir22010/a99f18ca19112bc7db0872a36a03a1ec)
+* yolov5 [2](https://github.com/ultralytics/yolov5)
