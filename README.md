@@ -25,9 +25,9 @@ $ python detect.py --source 0  # webcam
 ```
 
 ## Results
-* (https://i.ibb.co/6m1Jbv0/img1.jpg)
-* (https://i.ibb.co/f9mxKsJ/img2.jpg)
-* (https://i.ibb.co/CK3bRck/img3.jpg)
+* ![](https://i.ibb.co/6m1Jbv0/img1.jpg)
+* ![](https://i.ibb.co/f9mxKsJ/img2.jpg)
+* ![](https://i.ibb.co/CK3bRck/img3.jpg)
 
 ## Citation
 * [1] convert_voc_to_yolo.py [](https://gist.github.com/Amir22010/a99f18ca19112bc7db0872a36a03a1ec)
