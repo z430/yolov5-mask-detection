@@ -6,4 +6,4 @@ val: datasets/FaceMaskDataset/yolo/images/val/  # 128 images
 nc: 2
 
 # class names
-names: ['face', 'face_mask']
+names: ['NoMask', 'Masked']

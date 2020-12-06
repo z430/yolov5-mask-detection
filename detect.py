@@ -112,6 +112,9 @@ def detect(save_img=False):
 
             # Print time (inference + NMS)
             print('%sDone. (%.3fs)' % (s, t2 - t1))
+            runtime_fps = 1 / (t2 - t1)
+            cv2.putText(im0, f"Runtime FPS: {runtime_fps}", (30, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255))
 
             # Stream results
             if view_img:
