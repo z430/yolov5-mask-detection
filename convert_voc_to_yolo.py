@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 import shutil
 import glob
@@ -5,13 +6,14 @@ import os
 import xml.etree.ElementTree as ET
 import tqdm
 import cv2
+from sklearn import model_selection
 
 dirs = ['train', 'val']
-classes = ['face', 'face_mask']
+classes = ['with_mask', 'without_mask', 'mask_weared_incorrect']
 
 def getImagesInDir(dir_path):
     image_list = []
-    for filename in glob.glob(dir_path + '/*.jpg'):
+    for filename in glob.glob(dir_path + '/*.png'):
         image_list.append(filename)
 
     return image_list
@@ -61,7 +63,7 @@ def convert_annotation(dir_path, output_path, image_path):
 
 
 def main():
-    cwd = 'datasets/FaceMaskDataset'
+    cwd = 'datasets/archive/'
     for dir_path in dirs:
         full_dir_path = os.path.join(cwd, dir_path)
         output_path = os.path.join(cwd, f"yolo/labels/{dir_path}")
@@ -88,5 +90,27 @@ def main():
 
         print("Finished processing: " + dir_path)
 
+def split_image_set():
+    images_dir = "datasets/archive/images"
+
+    images_list = glob.glob(f"{images_dir}/*.png")
+
+    # split train and val
+    train, val = model_selection.train_test_split(images_list, test_size=0.3)
+    print(len(train), len(val))
+
+    os.makedirs("datasets/archive/train")
+    os.makedirs("datasets/archive/val")
+
+    for image in train:
+        shutil.move(image, "datasets/archive/train")
+        shutil.move(image.replace("png", "xml"), "datasets/archive/train")
+
+    for image in val:
+        shutil.move(image, "datasets/archive/val")
+        shutil.move(image.replace("png", "xml"), "datasets/archive/val")
+
+
 if __name__ == "__main__":
     main()
+    # split_image_set()
