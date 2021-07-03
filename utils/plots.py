@@ -1,22 +1,23 @@
 # Plotting utils
 
 import glob
+import math
 import os
-import random
 from copy import copy
 from pathlib import Path
 
 import cv2
-import math
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import seaborn as sn
 import torch
 import yaml
-from PIL import Image, ImageDraw
-from scipy.signal import butter, filtfilt
+from PIL import Image, ImageDraw, ImageFont
+from torchvision import transforms
 
-from utils.general import xywh2xyxy, xyxy2xywh
+from utils.general import increment_path, xywh2xyxy, xyxy2xywh
 from utils.metrics import fitness
 
 # Settings
@@ -24,12 +25,25 @@ matplotlib.rc('font', **{'size': 11})
 matplotlib.use('Agg')  # for writing to files only
 
 
-def color_list():
-    # Return first 10 plt colors as (r,g,b) https://stackoverflow.com/questions/51350872/python-from-color-name-to-rgb
-    def hex2rgb(h):
+class Colors:
+    # Ultralytics color palette https://ultralytics.com/
+    def __init__(self):
+        # hex = matplotlib.colors.TABLEAU_COLORS.values()
+        hex = ('FF3838', 'FF9D97', 'FF701F', 'FFB21D', 'CFD231', '48F90A', '92CC17', '3DDB86', '1A9334', '00D4BB',
+               '2C99A8', '00C2FF', '344593', '6473FF', '0018EC', '8438FF', '520085', 'CB38FF', 'FF95C8', 'FF37C7')
+        self.palette = [self.hex2rgb('#' + c) for c in hex]
+        self.n = len(self.palette)
+
+    def __call__(self, i, bgr=False):
+        c = self.palette[int(i) % self.n]
+        return (c[2], c[1], c[0]) if bgr else c
+
+    @staticmethod
+    def hex2rgb(h):  # rgb order (PIL)
         return tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4))
 
-    return [hex2rgb(h) for h in plt.rcParams['axes.prop_cycle'].by_key()['color']]
+
+colors = Colors()  # create instance for 'from utils.plots import colors'
 
 
 def hist2d(x, y, n=100):
@@ -42,6 +56,8 @@ def hist2d(x, y, n=100):
 
 
 def butter_lowpass_filtfilt(data, cutoff=1500, fs=50000, order=5):
+    from scipy.signal import butter, filtfilt
+
     # https://stackoverflow.com/questions/28536191/how-to-filter-smooth-with-scipy-numpy
     def butter_lowpass(cutoff, fs, order):
         nyq = 0.5 * fs
@@ -52,18 +68,32 @@ def butter_lowpass_filtfilt(data, cutoff=1500, fs=50000, order=5):
     return filtfilt(b, a, data)  # forward-backward filter
 
 
-def plot_one_box(x, img, color=None, label=None, line_thickness=None):
-    # Plots one bounding box on image img
-    tl = line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
-    color = color or [random.randint(0, 255) for _ in range(3)]
+def plot_one_box(x, im, color=(128, 128, 128), label=None, line_thickness=3):
+    # Plots one bounding box on image 'im' using OpenCV
+    assert im.data.contiguous, 'Image not contiguous. Apply np.ascontiguousarray(im) to plot_on_box() input image.'
+    tl = line_thickness or round(0.002 * (im.shape[0] + im.shape[1]) / 2) + 1  # line/font thickness
     c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
-    cv2.rectangle(img, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
+    cv2.rectangle(im, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
     if label:
         tf = max(tl - 1, 1)  # font thickness
         t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
         c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
-        cv2.rectangle(img, c1, c2, color, -1, cv2.LINE_AA)  # filled
-        cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
+        cv2.rectangle(im, c1, c2, color, -1, cv2.LINE_AA)  # filled
+        cv2.putText(im, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
+
+
+def plot_one_box_PIL(box, im, color=(128, 128, 128), label=None, line_thickness=None):
+    # Plots one bounding box on image 'im' using PIL
+    im = Image.fromarray(im)
+    draw = ImageDraw.Draw(im)
+    line_thickness = line_thickness or max(int(min(im.size) / 200), 2)
+    draw.rectangle(box, width=line_thickness, outline=color)  # plot
+    if label:
+        font = ImageFont.truetype("Arial.ttf", size=max(round(max(im.size) / 40), 12))
+        txt_width, txt_height = font.getsize(label)
+        draw.rectangle([box[0], box[1] - txt_height + 4, box[0] + txt_width, box[1]], fill=color)
+        draw.text((box[0], box[1] - txt_height + 1), label, fill=(255, 255, 255), font=font)
+    return np.asarray(im)
 
 
 def plot_wh_methods():  # from utils.plots import *; plot_wh_methods()
@@ -119,7 +149,6 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
         h = math.ceil(scale_factor * h)
         w = math.ceil(scale_factor * w)
 
-    colors = color_list()  # list of colors
     mosaic = np.full((int(ns * h), int(ns * w), 3), 255, dtype=np.uint8)  # init
     for i, img in enumerate(images):
         if i == max_subplots:  # if last batch has fewer images than we expect
@@ -141,7 +170,7 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
             conf = None if labels else image_targets[:, 6]  # check for confidence presence (label vs pred)
 
             if boxes.shape[1]:
-                if boxes.max() <= 1:  # if normalized
+                if boxes.max() <= 1.01:  # if normalized with tolerance 0.01
                     boxes[[0, 2]] *= w  # scale to pixels
                     boxes[[1, 3]] *= h
                 elif scale_factor < 1:  # absolute coords need scale if image scales
@@ -150,7 +179,7 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
             boxes[[1, 3]] += block_y
             for j, box in enumerate(boxes.T):
                 cls = int(classes[j])
-                color = colors[cls % len(colors)]
+                color = colors(cls)
                 cls = names[cls] if names else cls
                 if labels or conf[j] > 0.25:  # 0.25 conf thresh
                     label = '%s' % cls if labels else '%s %.1f' % (cls, conf[j])
@@ -188,6 +217,7 @@ def plot_lr_scheduler(optimizer, scheduler, epochs=300, save_dir=''):
     plt.xlim(0, epochs)
     plt.ylim(0)
     plt.savefig(Path(save_dir) / 'LR.png', dpi=200)
+    plt.close()
 
 
 def plot_test_txt():  # from utils.plots import *; plot_test()
@@ -222,72 +252,70 @@ def plot_targets_txt():  # from utils.plots import *; plot_targets_txt()
 
 def plot_study_txt(path='', x=None):  # from utils.plots import *; plot_study_txt()
     # Plot study.txt generated by test.py
-    fig, ax = plt.subplots(2, 4, figsize=(10, 6), tight_layout=True)
-    ax = ax.ravel()
+    plot2 = False  # plot additional results
+    if plot2:
+        ax = plt.subplots(2, 4, figsize=(10, 6), tight_layout=True)[1].ravel()
 
     fig2, ax2 = plt.subplots(1, 1, figsize=(8, 4), tight_layout=True)
-    for f in [Path(path) / f'study_coco_{x}.txt' for x in ['yolov5s', 'yolov5m', 'yolov5l', 'yolov5x']]:
+    # for f in [Path(path) / f'study_coco_{x}.txt' for x in ['yolov5s6', 'yolov5m6', 'yolov5l6', 'yolov5x6']]:
+    for f in sorted(Path(path).glob('study*.txt')):
         y = np.loadtxt(f, dtype=np.float32, usecols=[0, 1, 2, 3, 7, 8, 9], ndmin=2).T
         x = np.arange(y.shape[1]) if x is None else np.array(x)
-        s = ['P', 'R', 'mAP@.5', 'mAP@.5:.95', 't_inference (ms/img)', 't_NMS (ms/img)', 't_total (ms/img)']
-        for i in range(7):
-            ax[i].plot(x, y[i], '.-', linewidth=2, markersize=8)
-            ax[i].set_title(s[i])
+        if plot2:
+            s = ['P', 'R', 'mAP@.5', 'mAP@.5:.95', 't_preprocess (ms/img)', 't_inference (ms/img)', 't_NMS (ms/img)']
+            for i in range(7):
+                ax[i].plot(x, y[i], '.-', linewidth=2, markersize=8)
+                ax[i].set_title(s[i])
 
         j = y[3].argmax() + 1
-        ax2.plot(y[6, :j], y[3, :j] * 1E2, '.-', linewidth=2, markersize=8,
+        ax2.plot(y[5, 1:j], y[3, 1:j] * 1E2, '.-', linewidth=2, markersize=8,
                  label=f.stem.replace('study_coco_', '').replace('yolo', 'YOLO'))
 
     ax2.plot(1E3 / np.array([209, 140, 97, 58, 35, 18]), [34.6, 40.5, 43.0, 47.5, 49.7, 51.5],
              'k.-', linewidth=2, markersize=8, alpha=.25, label='EfficientDet')
 
-    ax2.grid()
-    ax2.set_xlim(0, 30)
-    ax2.set_ylim(28, 50)
-    ax2.set_yticks(np.arange(30, 55, 5))
+    ax2.grid(alpha=0.2)
+    ax2.set_yticks(np.arange(20, 60, 5))
+    ax2.set_xlim(0, 57)
+    ax2.set_ylim(30, 55)
     ax2.set_xlabel('GPU Speed (ms/img)')
     ax2.set_ylabel('COCO AP val')
     ax2.legend(loc='lower right')
-    plt.savefig('test_study.png', dpi=300)
+    plt.savefig(str(Path(path).name) + '.png', dpi=300)
 
 
-def plot_labels(labels, save_dir=Path(''), loggers=None):
+def plot_labels(labels, names=(), save_dir=Path(''), loggers=None):
     # plot dataset labels
+    print('Plotting labels... ')
     c, b = labels[:, 0], labels[:, 1:].transpose()  # classes, boxes
     nc = int(c.max() + 1)  # number of classes
-    colors = color_list()
+    x = pd.DataFrame(b.transpose(), columns=['x', 'y', 'width', 'height'])
 
     # seaborn correlogram
-    try:
-        import seaborn as sns
-        import pandas as pd
-        x = pd.DataFrame(b.transpose(), columns=['x', 'y', 'width', 'height'])
-        sns.pairplot(x, corner=True, diag_kind='hist', kind='scatter', markers='o',
-                     plot_kws=dict(s=3, edgecolor=None, linewidth=1, alpha=0.02),
-                     diag_kws=dict(bins=50))
-        plt.savefig(save_dir / 'labels_correlogram.jpg', dpi=200)
-        plt.close()
-    except Exception as e:
-        pass
+    sn.pairplot(x, corner=True, diag_kind='auto', kind='hist', diag_kws=dict(bins=50), plot_kws=dict(pmax=0.9))
+    plt.savefig(save_dir / 'labels_correlogram.jpg', dpi=200)
+    plt.close()
 
     # matplotlib labels
     matplotlib.use('svg')  # faster
     ax = plt.subplots(2, 2, figsize=(8, 8), tight_layout=True)[1].ravel()
-    ax[0].hist(c, bins=np.linspace(0, nc, nc + 1) - 0.5, rwidth=0.8)
-    ax[0].set_xlabel('classes')
-    ax[2].scatter(b[0], b[1], c=hist2d(b[0], b[1], 90), cmap='jet')
-    ax[2].set_xlabel('x')
-    ax[2].set_ylabel('y')
-    ax[3].scatter(b[2], b[3], c=hist2d(b[2], b[3], 90), cmap='jet')
-    ax[3].set_xlabel('width')
-    ax[3].set_ylabel('height')
+    y = ax[0].hist(c, bins=np.linspace(0, nc, nc + 1) - 0.5, rwidth=0.8)
+    # [y[2].patches[i].set_color([x / 255 for x in colors(i)]) for i in range(nc)]  # update colors bug #3195
+    ax[0].set_ylabel('instances')
+    if 0 < len(names) < 30:
+        ax[0].set_xticks(range(len(names)))
+        ax[0].set_xticklabels(names, rotation=90, fontsize=10)
+    else:
+        ax[0].set_xlabel('classes')
+    sn.histplot(x, x='x', y='y', ax=ax[2], bins=50, pmax=0.9)
+    sn.histplot(x, x='width', y='height', ax=ax[3], bins=50, pmax=0.9)
 
     # rectangles
     labels[:, 1:3] = 0.5  # center
     labels[:, 1:] = xywh2xyxy(labels[:, 1:]) * 2000
     img = Image.fromarray(np.ones((2000, 2000, 3), dtype=np.uint8) * 255)
     for cls, *box in labels[:1000]:
-        ImageDraw.Draw(img).rectangle(box, width=1, outline=colors[int(cls) % 10])  # plot
+        ImageDraw.Draw(img).rectangle(box, width=1, outline=colors(cls))  # plot
     ax[1].imshow(img)
     ax[1].axis('off')
 
@@ -302,13 +330,13 @@ def plot_labels(labels, save_dir=Path(''), loggers=None):
     # loggers
     for k, v in loggers.items() or {}:
         if k == 'wandb' and v:
-            v.log({"Labels": [v.Image(str(x), caption=x.name) for x in save_dir.glob('*labels*.jpg')]})
+            v.log({"Labels": [v.Image(str(x), caption=x.name) for x in save_dir.glob('*labels*.jpg')]}, commit=False)
 
 
 def plot_evolution(yaml_file='data/hyp.finetune.yaml'):  # from utils.plots import *; plot_evolution()
     # Plot hyperparameter evolution results in evolve.txt
     with open(yaml_file) as f:
-        hyp = yaml.load(f, Loader=yaml.FullLoader)
+        hyp = yaml.safe_load(f)
     x = np.loadtxt('evolve.txt', ndmin=2)
     f = fitness(x)
     # weights = (f - f.min()) ** 2  # for weighted results
@@ -327,6 +355,38 @@ def plot_evolution(yaml_file='data/hyp.finetune.yaml'):  # from utils.plots impo
         print('%15s: %.3g' % (k, mu))
     plt.savefig('evolve.png', dpi=200)
     print('\nPlot saved as evolve.png')
+
+
+def profile_idetection(start=0, stop=0, labels=(), save_dir=''):
+    # Plot iDetection '*.txt' per-image logs. from utils.plots import *; profile_idetection()
+    ax = plt.subplots(2, 4, figsize=(12, 6), tight_layout=True)[1].ravel()
+    s = ['Images', 'Free Storage (GB)', 'RAM Usage (GB)', 'Battery', 'dt_raw (ms)', 'dt_smooth (ms)', 'real-world FPS']
+    files = list(Path(save_dir).glob('frames*.txt'))
+    for fi, f in enumerate(files):
+        try:
+            results = np.loadtxt(f, ndmin=2).T[:, 90:-30]  # clip first and last rows
+            n = results.shape[1]  # number of rows
+            x = np.arange(start, min(stop, n) if stop else n)
+            results = results[:, x]
+            t = (results[0] - results[0].min())  # set t0=0s
+            results[0] = x
+            for i, a in enumerate(ax):
+                if i < len(results):
+                    label = labels[fi] if len(labels) else f.stem.replace('frames_', '')
+                    a.plot(t, results[i], marker='.', label=label, linewidth=1, markersize=5)
+                    a.set_title(s[i])
+                    a.set_xlabel('time (s)')
+                    # if fi == len(files) - 1:
+                    #     a.set_ylim(bottom=0)
+                    for side in ['top', 'right']:
+                        a.spines[side].set_visible(False)
+                else:
+                    a.remove()
+        except Exception as e:
+            print('Warning: Plotting error for %s; %s' % (f, e))
+
+    ax[1].legend()
+    plt.savefig(Path(save_dir) / 'idetection_profile.png', dpi=200)
 
 
 def plot_results_overlay(start=0, stop=0):  # from utils.plots import *; plot_results_overlay()
@@ -386,3 +446,30 @@ def plot_results(start=0, stop=0, bucket='', id=(), labels=(), save_dir=''):
 
     ax[1].legend()
     fig.savefig(Path(save_dir) / 'results.png', dpi=200)
+
+
+def feature_visualization(x, module_type, stage, n=64):
+    """
+    x:              Features to be visualized
+    module_type:    Module type
+    stage:          Module stage within model
+    n:              Maximum number of feature maps to plot
+    """
+    batch, channels, height, width = x.shape  # batch, channels, height, width
+    if height > 1 and width > 1:
+        project, name = 'runs/features', 'exp'
+        save_dir = increment_path(Path(project) / name)  # increment run
+        save_dir.mkdir(parents=True, exist_ok=True)  # make dir
+
+        plt.figure(tight_layout=True)
+        blocks = torch.chunk(x, channels, dim=1)  # block by channel dimension
+        n = min(n, len(blocks))
+        for i in range(n):
+            feature = transforms.ToPILImage()(blocks[i].squeeze())
+            ax = plt.subplot(int(math.sqrt(n)), int(math.sqrt(n)), i + 1)
+            ax.axis('off')
+            plt.imshow(feature)  # cmap='gray'
+
+        f = f"stage_{stage}_{module_type.split('.')[-1]}_features.png"
+        print(f'Saving {save_dir / f}...')
+        plt.savefig(save_dir / f, dpi=300)

@@ -255,3 +255,5 @@ fabric.properties
 datasets/
 checkpoints/
 .DS_Store
+
+yolov5/*
